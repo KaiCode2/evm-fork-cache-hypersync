@@ -4,6 +4,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Exact graph comparisons must not depend on a caller-wide color policy. CI
+# deliberately sets CARGO_TERM_COLOR=always, which otherwise leaves ANSI bytes
+# after Cargo's duplicate-edge `(*)` marker and defeats the normalization below.
+export CARGO_TERM_COLOR=never
+
 tracing_policy_error=""
 
 is_patched_tracing_subscriber_version() {
