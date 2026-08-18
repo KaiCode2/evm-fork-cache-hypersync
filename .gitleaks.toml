@@ -1,0 +1,13 @@
+title = "evm-fork-cache-hypersync secret scanning"
+minVersion = "v8.30.1"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Exclude only local credentials, Git internals, and generated Rust output"
+paths = [
+    '''(?:^|/)\.env$''',
+    '''(?:^|/)\.git(?:/.*)?$''',
+    '''(?:^|/)target(?:/.*)?$''',
+]

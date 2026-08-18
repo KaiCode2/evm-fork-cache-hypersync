@@ -1,0 +1,46 @@
+[package]
+name = "evm-fork-cache-hypersync"
+description = "HyperSync-backed event service for evm-fork-cache"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/evm-fork-cache-hypersync"
+readme = "README.md"
+keywords = ["ethereum", "evm", "hypersync", "indexer", "grpc"]
+categories = ["cryptography::cryptocurrencies", "network-programming", "database"]
+
+[dependencies]
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+evm-fork-cache-event-protocol.workspace = true
+evm-fork-cache-event-service.workspace = true
+futures.workspace = true
+hypersync-client.workspace = true
+prost.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+alloy-eips.workspace = true
+alloy-network.workspace = true
+alloy-primitives.workspace = true
+alloy-provider.workspace = true
+alloy-rpc-types-eth.workspace = true
+criterion.workspace = true
+evm-fork-cache = { workspace = true, features = ["reactive-ws"] }
+evm-fork-cache-remote.workspace = true
+tempfile = "3.23.0"
+
+[[bench]]
+name = "normalization"
+harness = false

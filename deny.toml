@@ -1,0 +1,50 @@
+[graph]
+all-features = true
+
+[advisories]
+# These are the only accepted advisories. The companion scope script proves
+# that each exception still has the reviewed dependency shape.
+# CI passes `--warn unmaintained`: lifecycle notices remain visible while
+# vulnerabilities and unsoundness advisories retain their default deny level.
+yanked = "deny"
+unsound = "all"
+ignore = [
+    { id = "RUSTSEC-2025-0055", reason = "scripts/check-security-exceptions.sh requires exact inactive 0.2.25 and proves every active tracing-subscriber is patched" },
+    { id = "RUSTSEC-2025-0143", reason = "HyperSync 1.4.0 constrains Cap'n Proto to 0.23; scripts/check-security-exceptions.sh proves the exact adapter-only path" },
+    { id = "RUSTSEC-2026-0253", reason = "Alloy 1.6 constrains lru to 0.16; scripts/check-security-exceptions.sh proves Alloy is the only immediate consumer and its caches use non-panicking integer/hash keys" },
+]
+
+[licenses]
+# This allowlist covers the complete locked graph. MPL-2.0 is accepted for
+# file-level-copyleft dependencies; workspace code does not copy or modify
+# those dependency source files. CDLA-Permissive-2.0 is a permissive data
+# license used by the locked webpki-roots packages.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

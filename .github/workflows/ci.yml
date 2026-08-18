@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  release-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Whole-worktree whitespace
+        run: bash scripts/check-worktree-whitespace.sh
+
+      - name: Tests
+        run: cargo test --workspace --all-targets --all-features --locked
+
+      - name: Documentation tests
+        run: cargo test --workspace --doc --locked
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked --no-deps -- -D warnings -D clippy::missing_errors_doc
+
+      - name: Documentation
+        run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+      - name: Benchmarks compile
+        run: cargo bench --workspace --no-run --locked
+
+      - name: Package protocol
+        run: cargo package --locked -p evm-fork-cache-event-protocol
+
+      # Cargo requires each publish dependency to exist in the registry even
+      # with --no-verify. Before the ordered initial release, content listing is
+      # the honest downstream preflight; workspace tests compile the full graph.
+      - name: Check downstream package contents
+        run: |
+          cargo package --list -p evm-fork-cache-remote
+          cargo package --list -p evm-fork-cache-event-service
+          cargo package --list -p evm-fork-cache-hypersync
+
+  msrv:
+    name: msrv (1.90)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install declared MSRV
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.90.0
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Check workspace on MSRV
+        run: cargo check --workspace --all-targets --locked
+
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+
+      - name: Install cargo-deny 0.20.2
+        run: cargo install --locked --version 0.20.2 cargo-deny
+
+      - name: Install cargo-audit 0.22.2
+        run: cargo install --locked --version 0.22.2 cargo-audit
+
+      - name: Verify scoped advisory exceptions
+        run: bash scripts/check-security-exceptions.sh
+
+      - name: Dependency policy
+        run: cargo deny check --warn unmaintained
+
+      - name: RustSec audit
+        # HyperSync 1.4.0 currently pins capnp 0.23. RUSTSEC-2025-0143 is
+        # tracked as a constrained upstream exception in SECURITY.md.
+        # The scope script requires the exact unreachable tracing-subscriber
+        # 0.2.25 lock entry and proves every active version is patched.
+        run: cargo audit --ignore RUSTSEC-2025-0055 --ignore RUSTSEC-2025-0143 --ignore RUSTSEC-2026-0253
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Install Gitleaks 8.30.1
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/gitleaks_8.30.1_linux_x64.tar.gz"
+          curl -sSfL \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            -o "$archive"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $archive" \
+            | sha256sum -c -
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Scan worktree and complete Git history
+        run: |
+          bash scripts/test-publication-security-gates.sh
+          bash scripts/check-secrets.sh
+          bash scripts/check-worktree-whitespace.sh

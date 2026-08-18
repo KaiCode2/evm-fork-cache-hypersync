@@ -1,0 +1,36 @@
+[package]
+name = "evm-fork-cache-remote"
+description = "Remote event subscriber for evm-fork-cache"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/evm-fork-cache-remote"
+readme = "README.md"
+keywords = ["ethereum", "evm", "indexer", "grpc", "subscriber"]
+categories = ["cryptography::cryptocurrencies", "network-programming"]
+
+[dependencies]
+alloy-consensus.workspace = true
+alloy-network.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+alloy-rpc-types-eth.workspace = true
+async-trait.workspace = true
+crc32fast.workspace = true
+evm-fork-cache.workspace = true
+evm-fork-cache-event-protocol.workspace = true
+futures.workspace = true
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
+
+[dev-dependencies]
+alloy-provider.workspace = true
+tokio.workspace = true

@@ -1,0 +1,524 @@
+syntax = "proto3";
+
+package evm_fork_cache.events.v1;
+
+// One durable bidirectional event session per negotiated session/chain pair.
+service EventStream {
+  // Negotiate authority, replace desired state, demand deliveries, and ACK them.
+  rpc Session(stream ClientMessage) returns (stream ServerMessage);
+}
+
+// Client-to-service envelope. Exactly one variant must be present.
+message ClientMessage {
+  oneof message {
+    Hello hello = 1;
+    ApplyDesiredState apply_desired_state = 2;
+    Acknowledge acknowledge = 3;
+    Heartbeat heartbeat = 4;
+    DeliveryDemand delivery_demand = 5;
+  }
+}
+
+// Service-to-client envelope. Exactly one variant must be present.
+message ServerMessage {
+  oneof message {
+    HelloAccepted hello_accepted = 1;
+    DesiredStateApplied desired_state_applied = 2;
+    Delivery delivery = 3;
+    AcknowledgementCommitted acknowledgement_committed = 4;
+    Heartbeat heartbeat = 6;
+    ProtocolError error = 7;
+  }
+  reserved 5;
+}
+
+// Initial protocol and durable-position negotiation.
+message Hello {
+  // Wire protocol version understood by the client.
+  uint32 protocol_version = 1;
+  // Stable durable session identifier within the service's trust domain.
+  string session_id = 2;
+  // EIP-155 chain identifier owned by this session.
+  uint64 chain_id = 3;
+  // Last delivery sequence embodied by the restored runtime checkpoint.
+  uint64 acknowledged_sequence = 4;
+  // Exact proof for the single runtime-ahead/service-pending crash window.
+  PendingDeliveryResume pending_delivery_resume = 5;
+}
+
+// Proof that a delivery's effects are already present in a restored runtime
+// checkpoint even though the service may still have that delivery in its
+// unacknowledged durable outbox. This is a consistency proof, not an
+// authentication credential.
+message PendingDeliveryResume {
+  // Opaque token from the delivery represented by the runtime checkpoint.
+  bytes delivery_token = 1;
+  // Opaque source checkpoint, with absence distinct at the schema level.
+  optional bytes provider_checkpoint = 2;
+  // Runtime-global canonical coverage represented by that checkpoint.
+  BlockRef coverage_head = 3;
+}
+
+// Authoritative service state returned after a successful Hello.
+message HelloAccepted {
+  // Negotiated wire protocol version.
+  uint32 protocol_version = 1;
+  // Echoed durable session identifier.
+  string session_id = 2;
+  // Echoed EIP-155 chain identifier.
+  uint64 chain_id = 3;
+  // Last desired-state revision committed by the service.
+  uint64 committed_revision = 4;
+  // Last delivery cursor durably acknowledged by the service.
+  Cursor acknowledged_cursor = 5;
+  // Complete service-authoritative desired state, when one exists.
+  ApplyDesiredState desired_state = 6;
+  // Capabilities available for the negotiated chain.
+  SourceCapabilities capabilities = 7;
+  // Resource policy enforced for this service.
+  ServiceLimits service_limits = 8;
+  // Last acknowledged cursor whose delivery affected runtime/cache state.
+  // Transport acknowledgement may be ahead through checkpoint-neutral
+  // desired-state activations.
+  RuntimeCheckpointPosition runtime_checkpoint_position = 9;
+}
+
+// Presence-bearing runtime checkpoint authority. New services always send the
+// wrapper; an absent inner cursor means no cache-affecting delivery has been
+// acknowledged. Wrapper absence identifies an older service and requires the
+// client to fall back to strict acknowledged_cursor semantics.
+message RuntimeCheckpointPosition {
+  Cursor cursor = 1;
+}
+
+// Service-enforced admission and resource ceilings.
+message ServiceLimits {
+  // Maximum owner entries in one desired-state replacement.
+  uint32 max_owners = 1;
+  // Maximum portable interests attached to one owner.
+  uint32 max_interests_per_owner = 2;
+  // Maximum addresses in one log interest.
+  uint32 max_addresses_per_log_interest = 3;
+  // Maximum accepted values in one topic position.
+  uint32 max_values_per_topic = 4;
+  // Maximum span of a bounded owner backfill.
+  uint64 max_bounded_backfill_blocks = 5;
+  // Maximum UTF-8 byte length of session and owner identifiers.
+  uint32 max_identifier_bytes = 6;
+  // Maximum interests across all owners.
+  uint32 max_total_interests = 7;
+  // Maximum address and topic filter values across all owners.
+  uint64 max_total_filter_values = 8;
+  // Maximum encoded desired-state size.
+  uint64 max_desired_state_bytes = 9;
+  // Maximum encoded delivery envelope size.
+  uint64 max_delivery_bytes = 10;
+  // Maximum simultaneously leased durable sessions.
+  uint32 max_active_sessions = 11;
+  // Maximum durable session identities retained in the SQLite authority.
+  uint64 max_persisted_sessions = 12;
+}
+
+// Aggregate and per-source capability advertisement.
+message SourceCapabilities {
+  // Capabilities available from the composed source boundary.
+  repeated Capability capabilities = 1;
+  // Optional topology describing individual source roles.
+  repeated SourceDescriptor sources = 2;
+}
+
+// One named component in a composed event source.
+message SourceDescriptor {
+  // Stable operator-facing source identifier.
+  string source_id = 1;
+  // Source's role in historical/live coordination.
+  SourceRole role = 2;
+  // Capabilities implemented by this component.
+  repeated Capability capabilities = 3;
+}
+
+// Role of one component in the source topology.
+enum SourceRole {
+  // Invalid or omitted role.
+  SOURCE_ROLE_UNSPECIFIED = 0;
+  // Historical/catch-up source.
+  SOURCE_ROLE_HISTORICAL = 1;
+  // Low-latency live source.
+  SOURCE_ROLE_LIVE = 2;
+  // Source that internally coordinates historical and live delivery.
+  SOURCE_ROLE_HYBRID = 3;
+}
+
+// Feature negotiated before the runtime relies on a source behavior.
+enum Capability {
+  // Invalid or omitted capability.
+  CAPABILITY_UNSPECIFIED = 0;
+  // Bounded or open historical catch-up.
+  CAPABILITY_HISTORICAL = 1;
+  // Continuous head-adjacent delivery.
+  CAPABILITY_LIVE = 2;
+  // EVM log delivery.
+  CAPABILITY_LOGS = 3;
+  // Complete hash-verified consensus headers.
+  CAPABILITY_HEADERS = 4;
+  // Full block bodies.
+  CAPABILITY_FULL_BLOCKS = 5;
+  // Mined transaction delivery.
+  CAPABILITY_TRANSACTIONS = 6;
+  // Pending transaction delivery.
+  CAPABILITY_PENDING = 7;
+  // Provider-side filter pushdown.
+  CAPABILITY_SERVER_FILTERING = 8;
+  // Runtime desired-state replacement after startup.
+  CAPABILITY_DYNAMIC_FILTERS = 9;
+  // Explicit canonical reorg controls.
+  CAPABILITY_EXPLICIT_REORGS = 10;
+  // Safe-head observations.
+  CAPABILITY_SAFE_HEAD = 11;
+  // Finalized-head observations.
+  CAPABILITY_FINALIZED_HEAD = 12;
+  // Provider-native opaque checkpoints.
+  CAPABILITY_NATIVE_CHECKPOINT = 13;
+  // Per-owner routed delivery.
+  CAPABILITY_OWNER_SCOPED_DELIVERY = 14;
+  // Replay from a durable acknowledged cursor/outbox.
+  CAPABILITY_DURABLE_REPLAY = 15;
+}
+
+// Complete revision-guarded replacement of the session's portable interests.
+message ApplyDesiredState {
+  // Wire protocol version used to encode this replacement.
+  uint32 protocol_version = 1;
+  // Target durable session identifier.
+  string session_id = 2;
+  // Target EIP-155 chain identifier.
+  uint64 chain_id = 3;
+  // Revision the client believes is currently authoritative.
+  uint64 expected_revision = 4;
+  // Immediate successor revision requested by the client.
+  uint64 new_revision = 5;
+  // Complete canonical and handler-owner interest set.
+  repeated OwnerInterests owners = 6;
+}
+
+// Portable interests and optional catch-up range for one routing owner.
+message OwnerInterests {
+  // Empty only for the canonical/base owner; otherwise a handler identifier.
+  string owner_id = 1;
+  // Provider-portable interests owned by this routing identity.
+  repeated PortableInterest interests = 2;
+  // Optional owner-scoped historical range activated with this revision.
+  Backfill backfill = 3;
+  // Whether matches contribute to the runtime's canonical broadcast stream.
+  bool canonical = 4;
+}
+
+// Explicit request for the next delivery or replay of the in-flight delivery.
+message DeliveryDemand {
+  // Negotiated durable session identifier.
+  string session_id = 1;
+}
+
+// Half-open provider scan range for one owner-specific catch-up.
+message Backfill {
+  // Inclusive first block.
+  uint64 from_block = 1;
+  // Exclusive last boundary; absent means catch up through activation/head.
+  optional uint64 to_block_excl = 2;
+  // Exact retained canonical state baseline immediately before from_block.
+  // When present, providers must prove this identity before accepting history.
+  BlockRef retained_baseline = 3;
+}
+
+// Provider-portable interest. Exactly one kind must be present.
+message PortableInterest {
+  oneof kind {
+    LogInterest log = 1;
+    BlockInterest block = 2;
+  }
+}
+
+// EVM log filter without provider-specific block range state.
+message LogInterest {
+  // Accepted emitting addresses; empty matches every address.
+  repeated bytes addresses = 1;
+  // Positional topic alternatives, from topic0 through topic3.
+  repeated TopicValues topics = 2;
+}
+
+// Alternatives accepted at one log topic position.
+message TopicValues {
+  // Accepted 32-byte topic values; empty acts as a wildcard.
+  repeated bytes values = 1;
+}
+
+// Interest in canonical block information.
+message BlockInterest {
+  // Required completeness level.
+  BlockMode mode = 1;
+}
+
+// Requested block payload completeness.
+enum BlockMode {
+  // Invalid or omitted block mode.
+  BLOCK_MODE_UNSPECIFIED = 0;
+  // Complete, hash-verified consensus header.
+  BLOCK_MODE_HEADER = 1;
+  // Full block body.
+  BLOCK_MODE_FULL_BLOCK = 2;
+}
+
+// Confirmation that one desired-state revision became durable.
+message DesiredStateApplied {
+  // Target durable session identifier.
+  string session_id = 1;
+  // Newly committed desired-state revision.
+  uint64 revision = 2;
+  // Sequence of the activation barrier that must be ingested next.
+  uint64 activation_sequence = 3;
+}
+
+// Post-ingestion commit request for exactly one in-flight delivery.
+message Acknowledge {
+  // Target durable session identifier.
+  string session_id = 1;
+  // Delivery sequence being committed.
+  uint64 sequence = 2;
+  // Exact opaque token carried by that delivery.
+  bytes delivery_token = 3;
+}
+
+// Confirmation that the service cursor and outbox commit completed.
+message AcknowledgementCommitted {
+  // Target durable session identifier.
+  string session_id = 1;
+  // Committed delivery sequence.
+  uint64 sequence = 2;
+  // Exact complete cursor from the committed delivery.
+  Cursor cursor = 3;
+}
+
+// Portable source scan position plus runtime-global canonical coverage.
+message Cursor {
+  // EIP-155 chain identifier.
+  uint64 chain_id = 1;
+  // Desired-state revision that authored this cursor.
+  uint64 query_revision = 2;
+  // Exclusive provider scan position; it may trail canonical_head during an
+  // explicitly activated owner catch-up rewind.
+  uint64 next_block = 3;
+  // Runtime-global canonical coverage, independent from owner scan position.
+  BlockRef canonical_head = 4;
+  reserved 5;
+  // Session delivery sequence carrying this cursor.
+  uint64 batch_sequence = 6;
+  // Opaque provider-native resume/checkpoint state.
+  bytes provider_checkpoint = 7;
+  // Exclusive portable scan boundary prepared for this revision's open-ended
+  // owner backfills. It remains fixed after activation and is independent of
+  // runtime-global canonical coverage.
+  optional uint64 owner_backfill_activation_block = 8;
+}
+
+// One ordered, replayable data or chain-control envelope.
+message Delivery {
+  // Target durable session identifier.
+  string session_id = 1;
+  // Monotonic session sequence.
+  uint64 sequence = 2;
+  // Desired-state revision that produced the delivery.
+  uint64 query_revision = 3;
+  // Opaque idempotency token; protocol v1 uses the big-endian sequence.
+  bytes delivery_token = 4;
+  // Authoritative post-delivery source and coverage cursor.
+  Cursor cursor = 5;
+  oneof payload {
+    DataPayload data = 6;
+    Reorg reorg = 7;
+    Finality finality = 8;
+    Barrier barrier = 9;
+  }
+  // True only for either an exact blockless `desired-state:<revision>`
+  // activation barrier or an exact blockless
+  // `source-progress:<revision>:<next_block>` scan-only barrier. These
+  // deliveries advance transport/session authority but have no runtime/cache
+  // effect and are consumed internally by the remote subscriber.
+  bool checkpoint_neutral = 10;
+}
+
+// Non-empty ordered set of event records.
+message DataPayload {
+  // Provider-validated records in deterministic chain order.
+  repeated EventRecord records = 1;
+}
+
+// One chain event plus independent routing and authority metadata.
+message EventRecord {
+  // Normalized EVM chain observation.
+  ChainEvent event = 1;
+  // Broadcast through canonical runtime routing when true.
+  bool canonical_audience = 2;
+  // Exact handler-owner audience when canonical_audience is false.
+  repeated string owner_ids = 3;
+  // Whether the record changes global coverage or only an owner's catch-up.
+  DeliveryScope scope = 4;
+}
+
+// Why this record is being delivered. This is orthogonal to its audience:
+// canonical catch-up may still broadcast, while owner catch-up is routed only
+// to the owners named on the record.
+enum DeliveryScope {
+  // Invalid or omitted scope.
+  DELIVERY_SCOPE_UNSPECIFIED = 0;
+  // Ordinary authoritative live record.
+  DELIVERY_SCOPE_CANONICAL = 1;
+  // Authoritative historical/recovery progress.
+  DELIVERY_SCOPE_CANONICAL_PROGRESS = 2;
+  // Routed replay that cannot advance runtime-global canonical state.
+  DELIVERY_SCOPE_OWNER_CATCHUP = 3;
+}
+
+// Normalized chain observation. Exactly one event must be present.
+message ChainEvent {
+  oneof event {
+    LogEvent log = 1;
+    BlockHeaderEvent block_header = 2;
+    BlockProgressEvent block_progress = 3;
+  }
+}
+
+// A canonical coverage observation that is not a complete EVM block header.
+// Consumers must never synthesize consensus header fields from this value.
+message BlockProgressEvent {
+  // Canonical block identity observed by the source.
+  BlockRef block = 1;
+}
+
+// Complete normalized EVM log and its mined block context.
+message LogEvent {
+  // 20-byte emitting contract address.
+  bytes address = 1;
+  // Zero to four 32-byte indexed topics.
+  repeated bytes topics = 2;
+  // Unindexed log data.
+  bytes data = 3;
+  // Containing block number.
+  uint64 block_number = 4;
+  // 32-byte containing block hash.
+  bytes block_hash = 5;
+  // 32-byte transaction hash.
+  bytes transaction_hash = 6;
+  // Transaction index within the block.
+  uint64 transaction_index = 7;
+  // Log index within the block.
+  uint64 log_index = 8;
+  // Containing block timestamp in Unix seconds.
+  uint64 block_timestamp = 9;
+  // Provider removal marker for a displaced canonical log.
+  bool removed = 10;
+}
+
+// Portable canonical block identity and continuity metadata.
+message BlockRef {
+  // Block number.
+  uint64 number = 1;
+  // 32-byte block hash.
+  bytes hash = 2;
+  // 32-byte parent block hash.
+  bytes parent_hash = 3;
+  // Block timestamp in Unix seconds.
+  uint64 timestamp = 4;
+}
+
+// Complete hash-verified consensus header response.
+message BlockHeaderEvent {
+  // Portable identity matching the decoded header.
+  BlockRef block = 1;
+  // Complete consensus header encoded as Ethereum RLP.
+  bytes consensus_header_rlp = 2;
+  // Optional RPC total difficulty as an unsigned big-endian integer.
+  bytes total_difficulty = 3;
+  // Optional RPC block size as an unsigned big-endian integer.
+  bytes size = 4;
+}
+
+// Explicit canonical branch replacement.
+message Reorg {
+  // Last block common to the old and replacement branches.
+  BlockRef common_ancestor = 1;
+  // Last previously delivered block on the displaced branch.
+  BlockRef old_tip = 2;
+  // Last block on the replacement suffix carried by the paired data delivery.
+  BlockRef new_tip = 3;
+}
+
+// Safe or finalized head observation.
+message Finality {
+  // Finality level being updated.
+  FinalityKind kind = 1;
+  // Block at that finality level.
+  BlockRef block = 2;
+}
+
+// Finality level.
+enum FinalityKind {
+  // Invalid or omitted finality level.
+  FINALITY_KIND_UNSPECIFIED = 0;
+  // Consensus safe head.
+  FINALITY_KIND_SAFE = 1;
+  // Consensus finalized head.
+  FINALITY_KIND_FINALIZED = 2;
+}
+
+// Ordered lifecycle or cursor-progress fence.
+message Barrier {
+  // Non-empty deterministic barrier identifier.
+  bytes id = 1;
+  // Optional newly proven canonical block; absent barriers may still advance
+  // an owner/provider scan cursor without advancing global coverage.
+  BlockRef block = 2;
+}
+
+// Liveness message with no delivery or cursor authority.
+message Heartbeat {
+  // Sender wall-clock timestamp in Unix milliseconds.
+  uint64 unix_millis = 1;
+}
+
+// Sanitized protocol/control failure.
+message ProtocolError {
+  // Stable machine-readable error class.
+  ErrorCode code = 1;
+  // Sanitized operator-facing description.
+  string message = 2;
+  // Service-authoritative desired-state revision, when relevant.
+  uint64 committed_revision = 3;
+  // Whether retrying after recovery/backoff can be meaningful.
+  bool retryable = 4;
+}
+
+// Stable public protocol error classification.
+enum ErrorCode {
+  // Invalid or omitted error class.
+  ERROR_CODE_UNSPECIFIED = 0;
+  // Unsupported wire version or pre-Hello operation.
+  ERROR_CODE_PROTOCOL_VERSION = 1;
+  // Structurally invalid desired state, demand, or acknowledgement.
+  ERROR_CODE_INVALID_INTEREST = 2;
+  // Client revision or resume position conflicts with durable authority.
+  ERROR_CODE_REVISION_CONFLICT = 3;
+  // Valid interest shape unsupported by the selected source.
+  ERROR_CODE_UNSUPPORTED_INTEREST = 4;
+  // Authentication or session-authorization failure.
+  ERROR_CODE_AUTHENTICATION = 5;
+  // Sanitized internal storage or service failure.
+  ERROR_CODE_INTERNAL = 6;
+  // Desired state cannot change while one delivery remains in flight.
+  ERROR_CODE_PENDING_DELIVERY = 7;
+  // Configured resource quota was exceeded.
+  ERROR_CODE_RESOURCE_EXHAUSTED = 8;
+  // Another connection currently leases the durable session.
+  ERROR_CODE_SESSION_IN_USE = 9;
+  // Provider/source is temporarily unable to make progress.
+  ERROR_CODE_SOURCE_UNAVAILABLE = 10;
+}

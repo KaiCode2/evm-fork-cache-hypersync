@@ -1,0 +1,23 @@
+[package]
+name = "evm-fork-cache-event-protocol"
+description = "Versioned wire protocol for remote evm-fork-cache event subscribers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/evm-fork-cache-event-protocol"
+readme = "README.md"
+keywords = ["ethereum", "evm", "grpc", "events", "protobuf"]
+categories = ["cryptography::cryptocurrencies", "network-programming"]
+
+[dependencies]
+prost.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+
+[build-dependencies]
+prost-build.workspace = true
+protoc-bin-vendored.workspace = true
+tonic-prost-build.workspace = true
